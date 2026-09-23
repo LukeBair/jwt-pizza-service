@@ -1,19 +1,19 @@
 const request = require('supertest');
-const { Role, DB } = require('../src/database/database.js');
+// const { Role, DB } = require('../src/database/database.js');
 
 const app = require('../src/service');
 
 const testUser = { name: 'pizza diner', email: 'reg@test.com', password: 'a' };
 let testUserAuthToken;
 
-async function createAdminUser() {
-    let user = { password: 'toomanysecrets', roles: [{ role: Role.Admin }] };
-    user.name = randomName();
-    user.email = user.name + '@admin.com';
-
-    user = await DB.addUser(user);
-    return { ...user, password: 'toomanysecrets' };
-}
+// async function createAdminUser() {
+//     let user = { password: 'toomanysecrets', roles: [{ role: Role.Admin }] };
+//     user.name = randomName();
+//     user.email = user.name + '@admin.com';
+//
+//     user = await DB.addUser(user);
+//     return { ...user, password: 'toomanysecrets' };
+// }
 
 beforeAll(async () => {
     testUser.email = Math.random().toString(36).substring(2, 12) + '@test.com';
