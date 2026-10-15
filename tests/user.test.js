@@ -108,6 +108,64 @@ test('list users defaults to the first page of all users', async () => {
     expect(res.body.users.length).toBeGreaterThan(0);
 });
 
+test('delete user unauthorized', async () => {
+    const deleteRes = await request(app).delete(`/api/user/${testUser.userID}`);
+    expect(deleteRes.status).toBe(401);
+});
+
+test('delete user forbidden for a diner', async () => {
+    const [victim] = await registerUser(request(app));
+    const [, otherToken] = await registerUser(request(app));
+    const deleteRes = await request(app)
+        .delete(`/api/user/${victim.id}`)
+        .set('Authorization', 'Bearer ' + otherToken);
+    expect(deleteRes.status).toBe(403);
+});
+
+test('delete user as admin removes the user', async () => {
+    const [victim, victimToken] = await registerUser(request(app));
+    const [adminToken] = await loginAdmin();
+
+    const deleteRes = await request(app)
+        .delete(`/api/user/${victim.id}`)
+        .set('Authorization', 'Bearer ' + adminToken);
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.message).toBe('user deleted');
+
+    const loginRes = await request(app).put('/api/auth').send({ email: victim.email, password: victim.password });
+    expect(loginRes.status).toBe(404);
+
+    const meRes = await request(app).get('/api/user/me').set('Authorization', 'Bearer ' + victimToken);
+    expect(meRes.status).toBe(401);
+
+    const listRes = await request(app)
+        .get(`/api/user?page=0&limit=1000&name=*`)
+        .set('Authorization', 'Bearer ' + adminToken);
+    expect(listRes.body.users.find((u) => u.id === victim.id)).toBeUndefined();
+});
+
+test('delete user removes their order history', async () => {
+    const [victim] = await registerUser(request(app));
+    const [adminToken] = await loginAdmin();
+    await DB.addDinerOrder(victim, { franchiseId: 1, storeId: 1, items: [{ menuId: 1, description: 'Veggie', price: 0.05 }] });
+
+    const deleteRes = await request(app)
+        .delete(`/api/user/${victim.id}`)
+        .set('Authorization', 'Bearer ' + adminToken);
+    expect(deleteRes.status).toBe(200);
+
+    const orders = await DB.getOrders({ id: victim.id });
+    expect(orders.orders).toHaveLength(0);
+});
+
+test('delete user that does not exist returns 404', async () => {
+    const [adminToken] = await loginAdmin();
+    const deleteRes = await request(app)
+        .delete('/api/user/99999999')
+        .set('Authorization', 'Bearer ' + adminToken);
+    expect(deleteRes.status).toBe(404);
+});
+
 async function loginAdmin() {
     const admin = { name: randomName(), password: 'toomanysecrets', roles: [{ role: Role.Admin }] };
     admin.email = admin.name + '@admin.com';
