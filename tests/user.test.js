@@ -1,5 +1,6 @@
 const request = require('supertest');
 
+const { Role, DB } = require('../src/database/database.js');
 const app = require('../src/service');
 
 const testUser = { name: 'pizza diner', email: 'reg@test.com', password: 'a' };
@@ -42,20 +43,6 @@ test('PUT /api/user/:userId returns 403 for a different diner', async () => {
     expect(res.status).toBe(403);
 });
 
-test('DELETE /api/user/:userId is not implemented', async () => {
-    const res = await request(app)
-        .delete(`/api/user/${testUser.userID}`)
-        .set('Authorization', `Bearer ${testUserAuthToken}`);
-    expect(res.status).toBe(200);
-    expect(res.text).toContain('not implemented');
-});
-
-test('GET /api/user is not implemented', async () => {
-    const res = await request(app).get('/api/user').set('Authorization', `Bearer ${testUserAuthToken}`);
-    expect(res.status).toBe(200);
-    expect(res.text).toContain('not implemented');
-});
-
 test('user routes return 401 without a token', async () => {
     const res = await request(app).get('/api/user/me');
     expect(res.status).toBe(401);
@@ -66,17 +53,72 @@ test('list users unauthorized', async () => {
     expect(listUsersRes.status).toBe(401);
 });
 
-test('list users', async () => {
-    const [user, userToken] = await registerUser(request(app));
+test('list users forbidden for a diner', async () => {
+    const [, userToken] = await registerUser(request(app));
     const listUsersRes = await request(app)
         .get('/api/user')
         .set('Authorization', 'Bearer ' + userToken);
-    expect(listUsersRes.status).toBe(200);
+    expect(listUsersRes.status).toBe(403);
 });
 
-async function registerUser(service) {
+test('list users as admin returns users without passwords', async () => {
+    const [user] = await registerUser(request(app));
+    const [adminToken] = await loginAdmin();
+    const listUsersRes = await request(app)
+        .get(`/api/user?page=0&limit=1000&name=${user.name}*`)
+        .set('Authorization', 'Bearer ' + adminToken);
+    expect(listUsersRes.status).toBe(200);
+    expect(typeof listUsersRes.body.more).toBe('boolean');
+    const found = listUsersRes.body.users.find((u) => u.id === user.id);
+    expect(found).toMatchObject({ id: user.id, name: user.name, email: user.email, roles: [{ role: 'diner' }] });
+    expect(found.password).toBeUndefined();
+});
+
+test('list users paginates', async () => {
+    const [adminToken] = await loginAdmin();
+    await registerUser(request(app));
+    await registerUser(request(app));
+
+    const page0 = await request(app).get('/api/user?page=0&limit=1').set('Authorization', 'Bearer ' + adminToken);
+    expect(page0.status).toBe(200);
+    expect(page0.body.users).toHaveLength(1);
+    expect(page0.body.more).toBe(true);
+
+    const page1 = await request(app).get('/api/user?page=1&limit=1').set('Authorization', 'Bearer ' + adminToken);
+    expect(page1.body.users).toHaveLength(1);
+    expect(page1.body.users[0].id).not.toBe(page0.body.users[0].id);
+});
+
+test('list users filters by name', async () => {
+    const [adminToken] = await loginAdmin();
+    const unique = randomName();
+    const [match] = await registerUser(request(app), `${unique} diner`);
+    await registerUser(request(app));
+
+    const res = await request(app).get(`/api/user?page=0&limit=10&name=${unique}*`).set('Authorization', 'Bearer ' + adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.users.map((u) => u.id)).toEqual([match.id]);
+    expect(res.body.more).toBe(false);
+});
+
+test('list users defaults to the first page of all users', async () => {
+    const [adminToken] = await loginAdmin();
+    const res = await request(app).get('/api/user').set('Authorization', 'Bearer ' + adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.users.length).toBeGreaterThan(0);
+});
+
+async function loginAdmin() {
+    const admin = { name: randomName(), password: 'toomanysecrets', roles: [{ role: Role.Admin }] };
+    admin.email = admin.name + '@admin.com';
+    await DB.addUser(admin);
+    const loginRes = await request(app).put('/api/auth').send({ email: admin.email, password: admin.password });
+    return [loginRes.body.token, loginRes.body.user];
+}
+
+async function registerUser(service, name = 'pizza diner') {
     const testUser = {
-        name: 'pizza diner',
+        name,
         email: `${randomName()}@test.com`,
         password: 'a',
     };
