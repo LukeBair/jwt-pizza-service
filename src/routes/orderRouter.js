@@ -3,6 +3,7 @@ const config = require('../config.js');
 const { Role, DB } = require('../database/database.js');
 const { authRouter } = require('./authRouter.js');
 const metrics = require('../metrics.js');
+const logger = require('../logger.js');
 const { asyncHandler, StatusCodeError } = require('../endpointHelper.js');
 
 const orderRouter = express.Router();
@@ -81,13 +82,15 @@ orderRouter.post(
     const orderReq = req.body;
     const order = await DB.addDinerOrder(req.user, orderReq);
     const start = Date.now();
+    const factoryReq = { diner: { id: req.user.id, name: req.user.name, email: req.user.email }, order };
     const r = await fetch(`${config.factory.url}/api/order`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', authorization: `Bearer ${config.factory.apiKey}` },
-      body: JSON.stringify({ diner: { id: req.user.id, name: req.user.name, email: req.user.email }, order }),
+      body: JSON.stringify(factoryReq),
     });
     const j = await r.json();
     const latency = Date.now() - start;
+    logger.factoryLogger({ url: `${config.factory.url}/api/order`, statusCode: r.status, latency, reqBody: factoryReq, resBody: j });
     if (r.ok) {
       metrics.pizzaPurchase(true, latency, order.items.length, order.items.reduce((sum, i) => sum + i.price, 0));
       res.send({ order, followLinkToEndChaos: j.reportUrl, jwt: j.jwt });
